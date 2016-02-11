@@ -1,3 +1,14 @@
+/*
+  Допущения: ипользуем пины от 1 до 9
+  На двузначных номерах могут сломаться множественный операции
+  Подключаем Pins "ENC28J60 Module" к Arduino Uno.
+  VCC - 3.3V
+  GND - GND
+  SCK - Pin 13
+  SO - Pin 12
+  SI - Pin 11
+  CS - Pin 10 Можно выбрать любой.
+*/
 #include <EtherCard.h>
 
 static byte mymac[] = { 0x5A,0x5A,0x5A,0x5A,0x5A,0x5A };
@@ -39,9 +50,12 @@ void statusJson() {
   );
   for(int i = 0; i < PinCount; i++) {
     bfill.emit_p(PSTR("{\"on\": $F, \"pin\": $D}"),
-      PinStatus[i]?PSTR("false"):PSTR("true"),
+      PinStatus[i]?PSTR("true"):PSTR("false"),
       LedPins[i]
     );
+    if (i+1 < PinCount && PinCount > 1) {
+      bfill.emit_p(PSTR(","));
+    }
   }
   bfill.emit_p(PSTR("]"));
 }
@@ -66,7 +80,7 @@ void setup() {
     //-----
     for(int i = 0; i < PinCount; i++) {
         pinMode(LedPins[i],OUTPUT);
-        PinStatus[i]=false;
+        digitalWrite(LedPins[i], PinStatus[i]);
     }
 }
 
@@ -78,21 +92,92 @@ void loop() {
   if (pos) {
     bfill = ether.tcpOffset();
     char *data = (char *) Ethernet::buffer + pos;
-    if (strncmp("GET /switch", data, 11) != 0) {
-      bfill.emit_p(http_404);
-    } else {
+    if (strncmp("GET /status ", data, 12) == 0) {
+      statusJson();
+    } else if (strncmp("GET /switch", data, 11) == 0) {
       data += 11;
-      if (strncmp("on=1", data, 4) == 0) {
-          PinStatus[1] = true;
-      }
-      if (strncmp("off=1", data, 4) == 0) {
-          PinStatus[1] = false;
-      }
-      // Применяем изменения состояния пинов
+      
+        if (strncmp(data, "?on=2 ", 6) == 0 ) {
+            PinStatus[0] = true;
+        }
+        if (strncmp(data, "?on=3 ", 6) == 0 ) {
+            PinStatus[1] = true;
+        }
+        if (strncmp(data, "?on=4 ", 6) == 0 ) {
+            PinStatus[2] = true;
+        }
+        if (strncmp(data, "?on=5 ", 6) == 0 ) {
+            PinStatus[3] = true;
+        }
+        if (strncmp(data, "?on=6 ", 6) == 0 ) {
+            PinStatus[4] = true;
+        }
+        if (strncmp(data, "?on=7 ", 6) == 0 ) {
+            PinStatus[5] = true;
+        }
+        if (strncmp(data, "?on=8 ", 6) == 0 ) {
+            PinStatus[6] = true;
+        }
+        if (strncmp(data, "?on=9 ", 6) == 0 ) {
+            PinStatus[7] = true;
+        }
+        if (strncmp(data, "?off=2 ", 7) == 0 ) {
+            PinStatus[0] = false;
+        }
+        if (strncmp(data, "?off=3 ", 7) == 0 ) {
+            PinStatus[1] = false;
+        }
+        if (strncmp(data, "?off=4 ", 7) == 0 ) {
+            PinStatus[2] = false;
+        }
+        if (strncmp(data, "?off=5 ", 7) == 0 ) {
+            PinStatus[3] = false;
+        }
+        if (strncmp(data, "?off=6 ", 7) == 0 ) {
+            PinStatus[4] = false;
+        }
+        if (strncmp(data, "?off=7 ", 7) == 0 ) {
+            PinStatus[5] = false;
+        }
+        if (strncmp(data, "?off=8 ", 7) == 0 ) {
+            PinStatus[6] = false;
+        }
+        if (strncmp(data, "?off=9 ", 7) == 0 ) {
+            PinStatus[7] = false;
+        }
+
+
       for (int i = 0; i < PinCount; i++) {
+        //int pin = LedPins[i];
+        //char *buffer;
+        //String bf;
+        //sprintf(buffer, "on=" + String(pin), pin);
+        //buffer = String(pin);
+
+        //bf = "?on=" + String(pin) + " ";
+        //if (strncmp(data, bf.c_str(), 6) == 0 ) {
+        //    PinStatus[i] = true;
+        //}
+        //sprintf(buffer, "?on=%d ", pin);
+        //if (strncmp(data, buffer, 6) == 0 ) {
+        //    PinStatus[i] = true;
+        //}
+
+
+        //sprintf(buffer, "off=%d", pin);
+        //if (strncmp(data, buffer, 7) == 0 ) {
+        //    PinStatus[i] = false;
+        //}
+        //if (strstr(data, buffer)) {
+        //    PinStatus[i] = false;
+        //}
+        //PinStatus[7] = true;
+        // Применяем изменения состояния пинов
         digitalWrite(LedPins[i], PinStatus[i]);
       }
-      statusJson(); // Return home page Если обнаружено изменения на станице, запускаем функцию.
+      statusJson();
+    } else {
+      bfill.emit_p(http_404);
     }
     ether.httpServerReply(bfill.position()); // send http response
   }
