@@ -19,29 +19,30 @@ byte Ethernet::buffer[500];
 
 BufferFiller bfill;
 
-// Количество рабочих пинов
-const int PinCount = 8;
+// Массив задействованных номеров Pins Arduino, для управления реле.
+// На первой ардуинке не работает пин 4
+const int LedPins[] = {2,3,5,6};
 
-// Массив задействованных номеров Pins Arduino, для управления например 8 реле.
-const int LedPins[PinCount] = {3,4,5,6,7,8,9};
+// Количество рабочих пинов
+const int PinCount = sizeof(LedPins) / sizeof(int);
 
 // Массив для фиксации изменений.
-boolean PinStatus[PinCount] = {false,false,false,false,false,false,false};
-
-// Количество рабочих кнопок
-const int buttonCount = 2;
+boolean PinStatus[PinCount];
 
 // Кнопки
-const int buttonPins[buttonCount] = {1,2};
+const int buttonPins[] = {9};
 
-// Пины, на которые влияют кнопки
-const int ledButtonPins[buttonCount] = {3,4};
+// Количество рабочих кнопок
+const int buttonCount = sizeof(buttonPins) / sizeof(int);
+
+// id пинов, на которые влияют кнопки
+const int ledButtonPinIds[buttonCount] = {3};
 
 // Состояние только что снятой кнопки
 int buttonState = 0;
 
 // Предыдущие статусы кнопок
-int lastButtonStates[buttonCount] = {0,0};
+int lastButtonStates[buttonCount] = {0};
 
 //-------------
 
@@ -80,9 +81,23 @@ int getPinStatus(int pinId) {
   // Убираем дребезг контактов
   if (lastButtonStates[pinId] != buttonState) {
     // Со временем нужно еще поиграться
+    Serial.print("Change 1. ");
+    Serial.print(" OldStatus: ");
+    Serial.print(lastButtonStates[pinId]);
+    Serial.print(" NewStatus: ");
+    Serial.print(buttonState);
+    Serial.print(" PinId: ");
+    Serial.println(pinId);
     delay(10);
     buttonState = digitalRead(buttonPins[pinId]);
     if (lastButtonStates[pinId] != buttonState) {
+      Serial.print("Change 2. ");
+      Serial.print(" OldStatus: ");
+      Serial.print(lastButtonStates[pinId]);
+      Serial.print(" NewStatus: ");
+      Serial.print(buttonState);
+      Serial.print(" PinId: ");
+      Serial.println(pinId);
       lastButtonStates[pinId] = buttonState;
     }
   }
@@ -110,11 +125,12 @@ void setup() {
     // Инициализация пинов ламп
     for(int i = 0; i < PinCount; i++) {
         pinMode(LedPins[i],OUTPUT);
+        PinStatus[i] = false;
         digitalWrite(LedPins[i], PinStatus[i]);
     }
     // Инициализация пинов кнопок
     for(int i = 0; i < buttonCount; i++) {
-      pinMode(ledButtonPins[i], INPUT);
+      pinMode(buttonPins[i], INPUT);
       digitalWrite(buttonPins[i], lastButtonStates[i]);
     }
 
@@ -126,7 +142,8 @@ void loop() {
 
   // Кнопочное включение
   for(int i = 0; i < buttonCount; i++) {
-    digitalWrite(ledButtonPins[i], getPinStatus(i));
+    PinStatus[ledButtonPinIds[i]] = getPinStatus(i);
+    digitalWrite(LedPins[ledButtonPinIds[i]], PinStatus[ledButtonPinIds[i]]);
   }
 
   word len = ether.packetReceive(); // check for ethernet packet / проверить ethernet пакеты.
@@ -138,85 +155,35 @@ void loop() {
       statusJson();
     } else if (strncmp("GET /switch", data, 11) == 0) {
       data += 11;
-      
-        if (strncmp(data, "?on=2 ", 6) == 0 ) {
+      if (strncmp(data, " ", 1) != 0 ) {
+        if (strncmp(data, "?2=true ", 8) == 0 ) {
             PinStatus[0] = true;
         }
-        if (strncmp(data, "?on=3 ", 6) == 0 ) {
-            PinStatus[1] = true;
-        }
-        if (strncmp(data, "?on=4 ", 6) == 0 ) {
-            PinStatus[2] = true;
-        }
-        if (strncmp(data, "?on=5 ", 6) == 0 ) {
-            PinStatus[3] = true;
-        }
-        if (strncmp(data, "?on=6 ", 6) == 0 ) {
-            PinStatus[4] = true;
-        }
-        if (strncmp(data, "?on=7 ", 6) == 0 ) {
-            PinStatus[5] = true;
-        }
-        if (strncmp(data, "?on=8 ", 6) == 0 ) {
-            PinStatus[6] = true;
-        }
-        if (strncmp(data, "?on=9 ", 6) == 0 ) {
-            PinStatus[7] = true;
-        }
-        if (strncmp(data, "?off=2 ", 7) == 0 ) {
+        if (strncmp(data, "?2=false ", 9) == 0 ) {
             PinStatus[0] = false;
         }
-        if (strncmp(data, "?off=3 ", 7) == 0 ) {
+        if (strncmp(data, "?3=true ", 8) == 0 ) {
+            PinStatus[1] = true;
+        }
+        if (strncmp(data, "?3=false ", 9) == 0 ) {
             PinStatus[1] = false;
         }
-        if (strncmp(data, "?off=4 ", 7) == 0 ) {
+        if (strncmp(data, "?5=true ", 8) == 0 ) {
+            PinStatus[2] = true;
+        }
+        if (strncmp(data, "?5=false ", 9) == 0 ) {
             PinStatus[2] = false;
         }
-        if (strncmp(data, "?off=5 ", 7) == 0 ) {
+        if (strncmp(data, "?6=true ", 8) == 0 ) {
+            PinStatus[3] = true;
+        }
+        if (strncmp(data, "?6=false ", 9) == 0 ) {
             PinStatus[3] = false;
         }
-        if (strncmp(data, "?off=6 ", 7) == 0 ) {
-            PinStatus[4] = false;
+        for (int i = 0; i < PinCount; i++) {
+          // Применяем изменения состояния пинов
+          digitalWrite(LedPins[i], PinStatus[i]);
         }
-        if (strncmp(data, "?off=7 ", 7) == 0 ) {
-            PinStatus[5] = false;
-        }
-        if (strncmp(data, "?off=8 ", 7) == 0 ) {
-            PinStatus[6] = false;
-        }
-        if (strncmp(data, "?off=9 ", 7) == 0 ) {
-            PinStatus[7] = false;
-        }
-
-
-      for (int i = 0; i < PinCount; i++) {
-        //int pin = LedPins[i];
-        //char buffer[];
-        //String bf;
-        //sprintf(buffer, "on=" + String(pin), pin);
-        //buffer = String(pin);
-
-        //bf = "?on=" + String(pin) + " ";
-        //if (strncmp(data, bf.c_str(), 6) == 0 ) {
-        //    PinStatus[i] = true;
-        //}
-        //char buffer[7];
-        //sprintf(buffer, "?on=%d ", pin);
-        //if (strncmp(data, buffer, 6) == 0 ) {
-        //    PinStatus[i] = true;
-        //}
-
-
-        //sprintf(buffer, "off=%d", pin);
-        //if (strncmp(data, buffer, 7) == 0 ) {
-        //    PinStatus[i] = false;
-        //}
-        //if (strstr(data, buffer)) {
-        //    PinStatus[i] = false;
-        //}
-        //PinStatus[7] = true;
-        // Применяем изменения состояния пинов
-        digitalWrite(LedPins[i], PinStatus[i]);
       }
       statusJson();
     } else {
