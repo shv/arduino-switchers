@@ -1,6 +1,9 @@
 /*
-  Допущения: ипользуем пины от 1 до 9
-  На двузначных номерах могут сломаться множественный операции
+  Допущения
+  – для управления нагрузкой ипользуем пины от 2 до 9
+  – для физических выключателей испльзуем аналоговые пины (0 - нет реакции, 1/2 - выключение, 1 - включение)
+  – запросы на управления через сеть имеют формат: GET /switch?<int pin>=<boolean status>
+  – запрос на получение состояний через сеть имеют формат: GET /switch или GET /status
   Подключаем Pins "ENC28J60 Module" к Arduino Uno.
   VCC - 3.3V
   GND - GND
@@ -20,7 +23,8 @@ byte Ethernet::buffer[500];
 BufferFiller bfill;
 
 // Массив задействованных номеров Pins Arduino, для управления реле.
-// На первой ардуинке не работает пин 4
+// На моей первой ардуинке не работает пин 4
+// При правке, не забыть поправить в loop() проверку запроса
 const int LedPins[] = {2,3,5,6};
 
 // Количество рабочих пинов
@@ -29,7 +33,25 @@ const int PinCount = sizeof(LedPins) / sizeof(int);
 // Массив для фиксации изменений.
 boolean PinStatus[PinCount];
 
+// Кнопки на аналоговых вводах
+// Для включения используем диапазон от 768 до 1023
+// Для выключения используем диапазон от 256 до 767
+// На значения до 255 не реагируем
+// Список сенсоров
+const int sensorPins[] = {A1,A2};
+
+// Количество сенсоров
+const int sensorCount = sizeof(sensorPins) / sizeof(int);
+
+// id пинов, на которые влияют сенсоры
+const int ledSensorPinIds[sensorCount] = {3,4};
+
+// Полученное значение сенсора
+int sensorValue = 0;
+
+
 // Кнопки
+// Список используемых кнопок
 const int buttonPins[] = {9};
 
 // Количество рабочих кнопок
@@ -111,7 +133,7 @@ void setup() {
     // if (ether.begin(sizeof Ethernet::buffer, mymac) == 0).
     // and change it to: Меняем (CS-pin) на 10.
     // if (ether.begin(sizeof Ethernet::buffer, mymac, 10) == 0).
-    if (ether.begin(sizeof Ethernet::buffer, mymac,10) == 0);
+    if (ether.begin(sizeof Ethernet::buffer, mymac, 10) == 0);
     if (!ether.dhcpSetup());
     // Выводим в Serial монитор IP адрес который нам автоматический присвоил наш Router.
     // Динамический IP адрес, это не удобно, периодический наш IP адрес будет меняться.
@@ -141,10 +163,28 @@ void loop() {
   delay(1); // Дёргаем микроконтроллер.
 
   // Кнопочное включение
-  for(int i = 0; i < buttonCount; i++) {
-    PinStatus[ledButtonPinIds[i]] = getPinStatus(i);
-    digitalWrite(LedPins[ledButtonPinIds[i]], PinStatus[ledButtonPinIds[i]]);
+  // for(int i = 0; i < buttonCount; i++) {
+  //   PinStatus[ledButtonPinIds[i]] = getPinStatus(i);
+  //   digitalWrite(LedPins[ledButtonPinIds[i]], PinStatus[ledButtonPinIds[i]]);
+  // }
+
+  for(int i = 0; i < sensorCount; i++) {
+    sensorValue = analogRead(sensorPins[i]);
+    if (sensorValue > 255) {
+      // Перепроверяем для сглаживания шума
+      delay(10);
+      sensorValue = analogRead(sensorPins[i]);
+      if (sensorValue > 767) {
+        // On
+        PinStatus[ledSensorPinIds[sensorCount]] = true;
+      } else if (sensorValue > 255) {
+        // Off
+        PinStatus[ledSensorPinIds[sensorCount]] = false;
+      }
+      PinStatus[ledSensorPinIds[sensorCount]] = PinStatus[ledSensorPinIds[sensorCount]];
+    }
   }
+
 
   word len = ether.packetReceive(); // check for ethernet packet / проверить ethernet пакеты.
   word pos = ether.packetLoop(len); // check for tcp packet / проверить TCP пакеты.
