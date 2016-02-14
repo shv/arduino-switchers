@@ -1,4 +1,7 @@
 /*
+  Полезные ссылки:
+  – http://jeelabs.org/pub/docs/ethercard/classBufferFiller.html
+  – http://arduino.ru/Reference
   Допущения
   – для управления нагрузкой ипользуем пины от 2 до 9
   – для физических выключателей испльзуем аналоговые пины (0 - нет реакции, 1/2 - выключение, 1 - включение)
@@ -22,6 +25,12 @@ byte Ethernet::buffer[500];
 
 BufferFiller bfill;
 
+// Общие переменные
+int i;
+char *data;
+word len;
+word pos;
+
 // Массив задействованных номеров Pins Arduino, для управления реле.
 // На моей первой ардуинке не работает пин 4
 // При правке, не забыть поправить в loop() проверку запроса
@@ -44,27 +53,15 @@ const int sensorPins[] = {A1,A2};
 const int sensorCount = sizeof(sensorPins) / sizeof(int);
 
 // id пинов, на которые влияют сенсоры
-const int ledSensorPinIds[sensorCount] = {3,4};
+const int ledSensorPinIds[sensorCount] = {2,3};
 
 // Полученное значение сенсора
 int sensorValue = 0;
 
+// Фотодатчики
+const int photoSensors[] = {A5};
+const int photoCount = sizeof(photoSensors) / sizeof(int);;
 
-// Кнопки
-// Список используемых кнопок
-const int buttonPins[] = {9};
-
-// Количество рабочих кнопок
-const int buttonCount = sizeof(buttonPins) / sizeof(int);
-
-// id пинов, на которые влияют кнопки
-const int ledButtonPinIds[buttonCount] = {3};
-
-// Состояние только что снятой кнопки
-int buttonState = 0;
-
-// Предыдущие статусы кнопок
-int lastButtonStates[buttonCount] = {0};
 
 //-------------
 
@@ -86,9 +83,17 @@ void statusJson() {
   bfill.emit_p(PSTR("$F["),
     http_OK
   );
-  for(int i = 0; i < PinCount; i++) {
+  // Вывод информации с аналоговых датчиков (освещенность)
+  for(i = 0; i < photoCount; i++) {
+    bfill.emit_p(PSTR("{\"value\": $D, \"pin\": $D},"),
+      analogRead(photoSensors[i]),
+      photoSensors[i]
+    );
+  }
+  // Вывод информации о включенных пинах
+  for(i = 0; i < PinCount; i++) {
     bfill.emit_p(PSTR("{\"on\": $F, \"pin\": $D}"),
-      PinStatus[i]?PSTR("true"):PSTR("false"),
+      PinStatus[i]?PSTR("false"):PSTR("true"),
       LedPins[i]
     );
     if (i+1 < PinCount && PinCount > 1) {
@@ -98,35 +103,6 @@ void statusJson() {
   bfill.emit_p(PSTR("]"));
 }
 
-int getPinStatus(int pinId) {
-  buttonState = digitalRead(buttonPins[pinId]);
-  // Убираем дребезг контактов
-  if (lastButtonStates[pinId] != buttonState) {
-    // Со временем нужно еще поиграться
-    Serial.print("Change 1. ");
-    Serial.print(" OldStatus: ");
-    Serial.print(lastButtonStates[pinId]);
-    Serial.print(" NewStatus: ");
-    Serial.print(buttonState);
-    Serial.print(" PinId: ");
-    Serial.println(pinId);
-    delay(10);
-    buttonState = digitalRead(buttonPins[pinId]);
-    if (lastButtonStates[pinId] != buttonState) {
-      Serial.print("Change 2. ");
-      Serial.print(" OldStatus: ");
-      Serial.print(lastButtonStates[pinId]);
-      Serial.print(" NewStatus: ");
-      Serial.print(buttonState);
-      Serial.print(" PinId: ");
-      Serial.println(pinId);
-      lastButtonStates[pinId] = buttonState;
-    }
-  }
-  return lastButtonStates[pinId];
-}
-
-
 void setup() {
     Serial.begin(9600);
     // По умолчанию в Библиотеке "ethercard" (CS-pin) = № 8.
@@ -134,7 +110,8 @@ void setup() {
     // and change it to: Меняем (CS-pin) на 10.
     // if (ether.begin(sizeof Ethernet::buffer, mymac, 10) == 0).
     if (ether.begin(sizeof Ethernet::buffer, mymac, 10) == 0);
-    if (!ether.dhcpSetup());
+    // DHCP слишком медленный и в случае отсутствия сети все тормозит
+    // if (!ether.dhcpSetup());
     // Выводим в Serial монитор IP адрес который нам автоматический присвоил наш Router.
     // Динамический IP адрес, это не удобно, периодический наш IP адрес будет меняться.
     // Нам придётся каждый раз узнавать кой адрес у нашей страницы.
@@ -145,30 +122,17 @@ void setup() {
     ether.printIp("My SET IP: ", ether.myip); // Выводим в Serial монитор статический IP адрес.
     //-----
     // Инициализация пинов ламп
-    for(int i = 0; i < PinCount; i++) {
+    for(i = 0; i < PinCount; i++) {
         pinMode(LedPins[i],OUTPUT);
-        PinStatus[i] = false;
+        PinStatus[i] = true;
         digitalWrite(LedPins[i], PinStatus[i]);
     }
-    // Инициализация пинов кнопок
-    for(int i = 0; i < buttonCount; i++) {
-      pinMode(buttonPins[i], INPUT);
-      digitalWrite(buttonPins[i], lastButtonStates[i]);
-    }
-
-
 }
 
 void loop() {
-  delay(1); // Дёргаем микроконтроллер.
+  delay(5); // Дёргаем микроконтроллер.
 
-  // Кнопочное включение
-  // for(int i = 0; i < buttonCount; i++) {
-  //   PinStatus[ledButtonPinIds[i]] = getPinStatus(i);
-  //   digitalWrite(LedPins[ledButtonPinIds[i]], PinStatus[ledButtonPinIds[i]]);
-  // }
-
-  for(int i = 0; i < sensorCount; i++) {
+  for(i = 0; i < sensorCount; i++) {
     sensorValue = analogRead(sensorPins[i]);
     if (sensorValue > 255) {
       // Перепроверяем для сглаживания шума
@@ -176,51 +140,51 @@ void loop() {
       sensorValue = analogRead(sensorPins[i]);
       if (sensorValue > 767) {
         // On
-        PinStatus[ledSensorPinIds[sensorCount]] = true;
+        PinStatus[ledSensorPinIds[i]] = false;
       } else if (sensorValue > 255) {
         // Off
-        PinStatus[ledSensorPinIds[sensorCount]] = false;
+        PinStatus[ledSensorPinIds[i]] = true;
       }
-      PinStatus[ledSensorPinIds[sensorCount]] = PinStatus[ledSensorPinIds[sensorCount]];
+      digitalWrite(LedPins[ledSensorPinIds[i]], PinStatus[ledSensorPinIds[i]]);
     }
   }
 
 
-  word len = ether.packetReceive(); // check for ethernet packet / проверить ethernet пакеты.
-  word pos = ether.packetLoop(len); // check for tcp packet / проверить TCP пакеты.
+  len = ether.packetReceive(); // check for ethernet packet / проверить ethernet пакеты.
+  pos = ether.packetLoop(len); // check for tcp packet / проверить TCP пакеты.
   if (pos) {
     bfill = ether.tcpOffset();
-    char *data = (char *) Ethernet::buffer + pos;
+    data = (char *) Ethernet::buffer + pos;
     if (strncmp("GET /status ", data, 12) == 0) {
       statusJson();
     } else if (strncmp("GET /switch", data, 11) == 0) {
       data += 11;
       if (strncmp(data, " ", 1) != 0 ) {
         if (strncmp(data, "?2=true ", 8) == 0 ) {
-            PinStatus[0] = true;
-        }
-        if (strncmp(data, "?2=false ", 9) == 0 ) {
             PinStatus[0] = false;
         }
-        if (strncmp(data, "?3=true ", 8) == 0 ) {
-            PinStatus[1] = true;
+        if (strncmp(data, "?2=false ", 9) == 0 ) {
+            PinStatus[0] = true;
         }
-        if (strncmp(data, "?3=false ", 9) == 0 ) {
+        if (strncmp(data, "?3=true ", 8) == 0 ) {
             PinStatus[1] = false;
         }
-        if (strncmp(data, "?5=true ", 8) == 0 ) {
-            PinStatus[2] = true;
+        if (strncmp(data, "?3=false ", 9) == 0 ) {
+            PinStatus[1] = true;
         }
-        if (strncmp(data, "?5=false ", 9) == 0 ) {
+        if (strncmp(data, "?5=true ", 8) == 0 ) {
             PinStatus[2] = false;
         }
-        if (strncmp(data, "?6=true ", 8) == 0 ) {
-            PinStatus[3] = true;
+        if (strncmp(data, "?5=false ", 9) == 0 ) {
+            PinStatus[2] = true;
         }
-        if (strncmp(data, "?6=false ", 9) == 0 ) {
+        if (strncmp(data, "?6=true ", 8) == 0 ) {
             PinStatus[3] = false;
         }
-        for (int i = 0; i < PinCount; i++) {
+        if (strncmp(data, "?6=false ", 9) == 0 ) {
+            PinStatus[3] = true;
+        }
+        for (i = 0; i < PinCount; i++) {
           // Применяем изменения состояния пинов
           digitalWrite(LedPins[i], PinStatus[i]);
         }
