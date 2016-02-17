@@ -1,6 +1,13 @@
 /*
-  Допущения: ипользуем пины от 1 до 9
-  На двузначных номерах могут сломаться множественный операции
+  Полезные ссылки:
+  – http://jeelabs.org/pub/docs/ethercard/classBufferFiller.html
+  – http://arduino.ru/Reference
+  Назначение
+  – Дискретное включение / выключение нагрузки в количестве 8 штук по сети
+  Допущения
+  – для управления нагрузкой ипользуем пины от 2 до 9
+  – запросы на управления через сеть имеют формат: GET /switch?<int pin>=<boolean status>
+  – запрос на получение состояний через сеть имеют формат: GET /switch или GET /status
   Подключаем Pins "ENC28J60 Module" к Arduino Uno.
   VCC - 3.3V
   GND - GND
@@ -19,14 +26,22 @@ byte Ethernet::buffer[500];
 
 BufferFiller bfill;
 
-// Количество рабочих пинов
-const int PinCount = 8;
+// Общие переменные
+int i;
+char *data;
+word len;
+word pos;
 
-// Массив задействованных номеров Pins Arduino, для управления например 8 реле.
-int LedPins[PinCount] = {2,3,4,5,6,7,8,9};
+// Массив задействованных номеров Pins Arduino, для управления реле.
+// При правке, не забыть поправить в loop() проверку запроса
+const int LedPins[] = {2,3,4,5,6,7,8,9};
+
+// Количество рабочих пинов
+const int PinCount = sizeof(LedPins) / sizeof(int);
 
 // Массив для фиксации изменений.
-boolean PinStatus[PinCount] = {false,false,false,false,false,false,false,false};
+boolean PinStatus[PinCount];
+
 
 //-------------
 
@@ -48,9 +63,10 @@ void statusJson() {
   bfill.emit_p(PSTR("$F["),
     http_OK
   );
-  for(int i = 0; i < PinCount; i++) {
+  // Вывод информации о включенных пинах
+  for(i = 0; i < PinCount; i++) {
     bfill.emit_p(PSTR("{\"on\": $F, \"pin\": $D}"),
-      PinStatus[i]?PSTR("true"):PSTR("false"),
+      PinStatus[i]?PSTR("false"):PSTR("true"),
       LedPins[i]
     );
     if (i+1 < PinCount && PinCount > 1) {
@@ -60,120 +76,88 @@ void statusJson() {
   bfill.emit_p(PSTR("]"));
 }
 
-
 void setup() {
     Serial.begin(9600);
     // По умолчанию в Библиотеке "ethercard" (CS-pin) = № 8.
-    // if (ether.begin(sizeof Ethernet::buffer, mymac) == 0).
-    // and change it to: Меняем (CS-pin) на 10.
-    // if (ether.begin(sizeof Ethernet::buffer, mymac, 10) == 0).
-    if (ether.begin(sizeof Ethernet::buffer, mymac,10) == 0);
-    if (!ether.dhcpSetup());
-    // Выводим в Serial монитор IP адрес который нам автоматический присвоил наш Router.
-    // Динамический IP адрес, это не удобно, периодический наш IP адрес будет меняться.
-    // Нам придётся каждый раз узнавать кой адрес у нашей страницы.
-    ether.printIp("My Router IP: ", ether.myip); // Выводим в Serial монитор IP адрес который нам присвоил Router.
-    // Здесь мы подменяем наш динамический IP на статический / постоянный IP Address нашей Web страницы.
-    // Теперь не важно какой IP адрес присвоит нам Router, автоматический будем менять его, например на "192.168.1.222".
+    if (ether.begin(sizeof Ethernet::buffer, mymac, 10) == 0);
+    // Здесь мы подменяем наш динамический IP на статический / постоянный IP Address ноды
     ether.staticSetup(myip);
     ether.printIp("My SET IP: ", ether.myip); // Выводим в Serial монитор статический IP адрес.
     //-----
-    for(int i = 0; i < PinCount; i++) {
+    // Инициализация пинов ламп
+    for(i = 0; i < PinCount; i++) {
         pinMode(LedPins[i],OUTPUT);
+        PinStatus[i] = true;
         digitalWrite(LedPins[i], PinStatus[i]);
     }
 }
 
 void loop() {
-  delay(1); // Дёргаем микроконтроллер.
+  delay(5); // Дёргаем микроконтроллер.
 
-  word len = ether.packetReceive(); // check for ethernet packet / проверить ethernet пакеты.
-  word pos = ether.packetLoop(len); // check for tcp packet / проверить TCP пакеты.
+  len = ether.packetReceive(); // check for ethernet packet / проверить ethernet пакеты.
+  pos = ether.packetLoop(len); // check for tcp packet / проверить TCP пакеты.
   if (pos) {
     bfill = ether.tcpOffset();
-    char *data = (char *) Ethernet::buffer + pos;
+    data = (char *) Ethernet::buffer + pos;
     if (strncmp("GET /status ", data, 12) == 0) {
       statusJson();
     } else if (strncmp("GET /switch", data, 11) == 0) {
       data += 11;
-      
-        if (strncmp(data, "?on=2 ", 6) == 0 ) {
-            PinStatus[0] = true;
-        }
-        if (strncmp(data, "?on=3 ", 6) == 0 ) {
-            PinStatus[1] = true;
-        }
-        if (strncmp(data, "?on=4 ", 6) == 0 ) {
-            PinStatus[2] = true;
-        }
-        if (strncmp(data, "?on=5 ", 6) == 0 ) {
-            PinStatus[3] = true;
-        }
-        if (strncmp(data, "?on=6 ", 6) == 0 ) {
-            PinStatus[4] = true;
-        }
-        if (strncmp(data, "?on=7 ", 6) == 0 ) {
-            PinStatus[5] = true;
-        }
-        if (strncmp(data, "?on=8 ", 6) == 0 ) {
-            PinStatus[6] = true;
-        }
-        if (strncmp(data, "?on=9 ", 6) == 0 ) {
-            PinStatus[7] = true;
-        }
-        if (strncmp(data, "?off=2 ", 7) == 0 ) {
+      if (strncmp(data, " ", 1) != 0 ) {
+        if (strncmp(data, "?2=true ", 8) == 0 ) {
             PinStatus[0] = false;
         }
-        if (strncmp(data, "?off=3 ", 7) == 0 ) {
+        if (strncmp(data, "?2=false ", 9) == 0 ) {
+            PinStatus[0] = true;
+        }
+        if (strncmp(data, "?3=true ", 8) == 0 ) {
             PinStatus[1] = false;
         }
-        if (strncmp(data, "?off=4 ", 7) == 0 ) {
+        if (strncmp(data, "?3=false ", 9) == 0 ) {
+            PinStatus[1] = true;
+        }
+        if (strncmp(data, "?4=true ", 8) == 0 ) {
             PinStatus[2] = false;
         }
-        if (strncmp(data, "?off=5 ", 7) == 0 ) {
+        if (strncmp(data, "?4=false ", 9) == 0 ) {
+            PinStatus[2] = true;
+        }
+        if (strncmp(data, "?5=true ", 8) == 0 ) {
             PinStatus[3] = false;
         }
-        if (strncmp(data, "?off=6 ", 7) == 0 ) {
+        if (strncmp(data, "?5=false ", 9) == 0 ) {
+            PinStatus[3] = true;
+        }
+        if (strncmp(data, "?6=true ", 8) == 0 ) {
             PinStatus[4] = false;
         }
-        if (strncmp(data, "?off=7 ", 7) == 0 ) {
+        if (strncmp(data, "?6=false ", 9) == 0 ) {
+            PinStatus[4] = true;
+        }
+        if (strncmp(data, "?7=true ", 8) == 0 ) {
             PinStatus[5] = false;
         }
-        if (strncmp(data, "?off=8 ", 7) == 0 ) {
+        if (strncmp(data, "?7=false ", 9) == 0 ) {
+            PinStatus[5] = true;
+        }
+        if (strncmp(data, "?8=true ", 8) == 0 ) {
             PinStatus[6] = false;
         }
-        if (strncmp(data, "?off=9 ", 7) == 0 ) {
+        if (strncmp(data, "?8=false ", 9) == 0 ) {
+            PinStatus[6] = true;
+        }
+        if (strncmp(data, "?9=true ", 8) == 0 ) {
             PinStatus[7] = false;
         }
+        if (strncmp(data, "?9=false ", 9) == 0 ) {
+            PinStatus[7] = true;
+        }
 
-
-      for (int i = 0; i < PinCount; i++) {
-        //int pin = LedPins[i];
-        //char *buffer;
-        //String bf;
-        //sprintf(buffer, "on=" + String(pin), pin);
-        //buffer = String(pin);
-
-        //bf = "?on=" + String(pin) + " ";
-        //if (strncmp(data, bf.c_str(), 6) == 0 ) {
-        //    PinStatus[i] = true;
-        //}
-        //sprintf(buffer, "?on=%d ", pin);
-        //if (strncmp(data, buffer, 6) == 0 ) {
-        //    PinStatus[i] = true;
-        //}
-
-
-        //sprintf(buffer, "off=%d", pin);
-        //if (strncmp(data, buffer, 7) == 0 ) {
-        //    PinStatus[i] = false;
-        //}
-        //if (strstr(data, buffer)) {
-        //    PinStatus[i] = false;
-        //}
-        //PinStatus[7] = true;
-        // Применяем изменения состояния пинов
-        digitalWrite(LedPins[i], PinStatus[i]);
+        for (i = 0; i < PinCount; i++) {
+          // Применяем изменения состояния пинов
+          digitalWrite(LedPins[i], PinStatus[i]);
+        }
       }
       statusJson();
     } else {
