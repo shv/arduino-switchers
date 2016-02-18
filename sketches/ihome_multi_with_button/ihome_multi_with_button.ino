@@ -1,6 +1,16 @@
 /*
-  Допущения: ипользуем пины от 1 до 9
-  На двузначных номерах могут сломаться множественный операции
+  Полезные ссылки:
+  – http://jeelabs.org/pub/docs/ethercard/classBufferFiller.html
+  – http://arduino.ru/Reference
+  Назначение
+  – дискретное включение / выключение нагрузки в количестве 4-х штук по сети
+  – дискретное включение / выключение нагрузки в количестве 4-х штук с помощью 4-х 3-х позиционных кнопок (0, 0.5, 1)
+  – сбор данных с аналоговых входов
+  Допущения
+  – для управления нагрузкой ипользуем пины от 2 до 9
+  – для физических выключателей испльзуем аналоговые пины (0 - нет реакции, 1/2 - выключение, 1 - включение)
+  – запросы на управления через сеть имеют формат: GET /switch?<int pin>=<boolean status>
+  – запрос на получение состояний через сеть имеют формат: GET /switch или GET /status
   Подключаем Pins "ENC28J60 Module" к Arduino Uno.
   VCC - 3.3V
   GND - GND
@@ -19,29 +29,43 @@ byte Ethernet::buffer[500];
 
 BufferFiller bfill;
 
-// Количество рабочих пинов
-const int PinCount = 8;
+// Общие переменные
+int i;
+char *data;
+word len;
+word pos;
 
-// Массив задействованных номеров Pins Arduino, для управления например 8 реле.
-const int LedPins[PinCount] = {3,4,5,6,7,8,9};
+// Массив задействованных номеров Pins Arduino, для управления реле.
+// На моей первой ардуинке не работает пин 4
+// При правке, не забыть поправить в loop() проверку запроса
+const int LedPins[] = {2,3,5,6};
+
+// Количество рабочих пинов
+const int PinCount = sizeof(LedPins) / sizeof(int);
 
 // Массив для фиксации изменений.
-boolean PinStatus[PinCount] = {false,false,false,false,false,false,false};
+boolean PinStatus[PinCount];
 
-// Количество рабочих кнопок
-const int buttonCount = 2;
+// Кнопки на аналоговых вводах
+// Для включения используем диапазон от 768 до 1023
+// Для выключения используем диапазон от 256 до 767
+// На значения до 255 не реагируем
+// Список сенсоров
+const int sensorPins[] = {A1,A2,A3,A4};
 
-// Кнопки
-const int buttonPins[buttonCount] = {1,2};
+// Количество сенсоров
+const int sensorCount = sizeof(sensorPins) / sizeof(int);
 
-// Пины, на которые влияют кнопки
-const int ledButtonPins[buttonCount] = {3,4};
+// id пинов, на которые влияют сенсоры
+const int ledSensorPinIds[sensorCount] = {0,1,2,3};
 
-// Состояние только что снятой кнопки
-int buttonState = 0;
+// Полученное значение сенсора
+int sensorValue = 0;
 
-// Предыдущие статусы кнопок
-int lastButtonStates[buttonCount] = {0,0};
+// Фотодатчики
+const int photoSensors[] = {A5};
+const int photoCount = sizeof(photoSensors) / sizeof(int);;
+
 
 //-------------
 
@@ -57,15 +81,21 @@ const char http_404[] PROGMEM =
 
 //------------
 
-// Делаем функцию для оформления нашей Web страницы.
-
 void statusJson() {
   bfill.emit_p(PSTR("$F["),
     http_OK
   );
-  for(int i = 0; i < PinCount; i++) {
+  // Вывод информации с аналоговых датчиков (освещенность)
+  for(i = 0; i < photoCount; i++) {
+    bfill.emit_p(PSTR("{\"value\": $D, \"pin\": $D},"),
+      analogRead(photoSensors[i]),
+      photoSensors[i]
+    );
+  }
+  // Вывод информации о включенных пинах
+  for(i = 0; i < PinCount; i++) {
     bfill.emit_p(PSTR("{\"on\": $F, \"pin\": $D}"),
-      PinStatus[i]?PSTR("true"):PSTR("false"),
+      PinStatus[i]?PSTR("false"):PSTR("true"),
       LedPins[i]
     );
     if (i+1 < PinCount && PinCount > 1) {
@@ -75,196 +105,80 @@ void statusJson() {
   bfill.emit_p(PSTR("]"));
 }
 
-int getPinStatus(int pinId) {
-  buttonState = digitalRead(buttonPins[pinId]);
-  // Убираем дребезг контактов
-  if (lastButtonStates[pinId] != buttonState) {
-    // Со временем нужно еще поиграться
-    delay(10);
-    buttonState = digitalRead(buttonPins[pinId]);
-    if (lastButtonStates[pinId] != buttonState) {
-      lastButtonStates[pinId] = buttonState;
-    }
-  }
-  return lastButtonStates[pinId];
-}
-
-
 void setup() {
     Serial.begin(9600);
     // По умолчанию в Библиотеке "ethercard" (CS-pin) = № 8.
-    // if (ether.begin(sizeof Ethernet::buffer, mymac) == 0).
-    // and change it to: Меняем (CS-pin) на 10.
-    // if (ether.begin(sizeof Ethernet::buffer, mymac, 10) == 0).
-    if (ether.begin(sizeof Ethernet::buffer, mymac,10) == 0);
-    if (!ether.dhcpSetup());
-    // Выводим в Serial монитор IP адрес который нам автоматический присвоил наш Router.
-    // Динамический IP адрес, это не удобно, периодический наш IP адрес будет меняться.
-    // Нам придётся каждый раз узнавать кой адрес у нашей страницы.
-    ether.printIp("My Router IP: ", ether.myip); // Выводим в Serial монитор IP адрес который нам присвоил Router.
-    // Здесь мы подменяем наш динамический IP на статический / постоянный IP Address нашей Web страницы.
-    // Теперь не важно какой IP адрес присвоит нам Router, автоматический будем менять его, например на "192.168.1.222".
+    if (ether.begin(sizeof Ethernet::buffer, mymac, 10) == 0);
     ether.staticSetup(myip);
     ether.printIp("My SET IP: ", ether.myip); // Выводим в Serial монитор статический IP адрес.
     //-----
     // Инициализация пинов ламп
-    for(int i = 0; i < PinCount; i++) {
+    for(i = 0; i < PinCount; i++) {
         pinMode(LedPins[i],OUTPUT);
+        PinStatus[i] = true;
         digitalWrite(LedPins[i], PinStatus[i]);
     }
-    // Инициализация пинов кнопок
-    for(int i = 0; i < buttonCount; i++) {
-      pinMode(ledButtonPins[i], INPUT);
-      digitalWrite(buttonPins[i], lastButtonStates[i]);
-    }
-
-
 }
 
 void loop() {
-  delay(1); // Дёргаем микроконтроллер.
+  delay(5); // Дёргаем микроконтроллер.
 
-  // Кнопочное включение
-  for(int i = 0; i < buttonCount; i++) {
-    digitalWrite(ledButtonPins[i], getPinStatus(i));
+  for(i = 0; i < sensorCount; i++) {
+    sensorValue = analogRead(sensorPins[i]);
+    if (sensorValue > 255) {
+      // Перепроверяем для сглаживания шума
+      delay(10);
+      sensorValue = analogRead(sensorPins[i]);
+      if (sensorValue > 767) {
+        // On
+        PinStatus[ledSensorPinIds[i]] = false;
+      } else if (sensorValue > 255) {
+        // Off
+        PinStatus[ledSensorPinIds[i]] = true;
+      }
+      digitalWrite(LedPins[ledSensorPinIds[i]], PinStatus[ledSensorPinIds[i]]);
+    }
   }
 
-  word len = ether.packetReceive(); // check for ethernet packet / проверить ethernet пакеты.
-  word pos = ether.packetLoop(len); // check for tcp packet / проверить TCP пакеты.
+
+  len = ether.packetReceive(); // check for ethernet packet / проверить ethernet пакеты.
+  pos = ether.packetLoop(len); // check for tcp packet / проверить TCP пакеты.
   if (pos) {
     bfill = ether.tcpOffset();
-    char *data = (char *) Ethernet::buffer + pos;
- 
-    
-    Serial.println(data); // Выводим в Serial монитор IP адрес который нам присвоил Router.
-    
+    data = (char *) Ethernet::buffer + pos;
     if (strncmp("GET /status ", data, 12) == 0) {
       statusJson();
     } else if (strncmp("GET /switch", data, 11) == 0) {
-      // Запрос такого формата: /switch?1=0&2=0&3=1&4=1
-      // Оставляем первую строку
-      char *str = strtok (data,"\r\n");
-      // Выделяем метод
-      char *method = strtok (str," ");
-      Serial.print("Method: "); // Выводим в Serial монитор IP адрес который нам присвоил Router.
-      Serial.println(method);
-      // Получаем строку запроса
-      char *req = strtok (NULL," ");
-      Serial.print("Request: "); // Выводим в Serial монитор IP адрес который нам присвоил Router.
-      Serial.println(req);
-      // Получаем локейшн запроса
-      char *uri = strtok (req,"?"); // во втором параметре указаны разделитель (пробел, запятая, точка, тире)
-      Serial.print("URI: "); // Выводим в Serial монитор IP адрес который нам присвоил Router.
-      Serial.println(uri);
-      if (uri) {
-        // Получаем первый аргумент
-        char *arg = strtok (NULL, "&");
-        // пока есть лексемы
-        while (arg != NULL) {
-          char *value = strchr(arg, '=');
-          if (value != 0) {
-            *value = 0;
-            Serial.print("Arg name: "); // Выводим в Serial монитор IP адрес который нам присвоил Router.
-            Serial.println(arg);
-            int key = atoi(arg);
-            Serial.print("Arg key: "); // Выводим в Serial монитор IP адрес который нам присвоил Router.
-            Serial.println(key);
-            ++value;
-            Serial.print("Arg value: "); // Выводим в Serial монитор IP адрес который нам присвоил Router.
-            Serial.println(value);
-            int val = atoi(value);
-            Serial.print("Arg val: "); // Выводим в Serial монитор IP адрес который нам присвоил Router.
-            Serial.println(val);
-    
-            PinStatus[key] = val?true:false;
-  
-            printf("Arg: name=%s, value=%d\n", arg, val);
-          }
-          arg = strtok (NULL, "&");
-        }
-      }
-      statusJson();
-    } else if (strncmp("GET /switch_one", data, 15) == 0) {
-      data += 15;
-      
-        if (strncmp(data, "?on=2 ", 6) == 0 ) {
-            PinStatus[0] = true;
-        }
-        if (strncmp(data, "?on=3 ", 6) == 0 ) {
-            PinStatus[1] = true;
-        }
-        if (strncmp(data, "?on=4 ", 6) == 0 ) {
-            PinStatus[2] = true;
-        }
-        if (strncmp(data, "?on=5 ", 6) == 0 ) {
-            PinStatus[3] = true;
-        }
-        if (strncmp(data, "?on=6 ", 6) == 0 ) {
-            PinStatus[4] = true;
-        }
-        if (strncmp(data, "?on=7 ", 6) == 0 ) {
-            PinStatus[5] = true;
-        }
-        if (strncmp(data, "?on=8 ", 6) == 0 ) {
-            PinStatus[6] = true;
-        }
-        if (strncmp(data, "?on=9 ", 6) == 0 ) {
-            PinStatus[7] = true;
-        }
-        if (strncmp(data, "?off=2 ", 7) == 0 ) {
+      data += 11;
+      if (strncmp(data, " ", 1) != 0 ) {
+        if (strncmp(data, "?2=true ", 8) == 0 ) {
             PinStatus[0] = false;
         }
-        if (strncmp(data, "?off=3 ", 7) == 0 ) {
+        if (strncmp(data, "?2=false ", 9) == 0 ) {
+            PinStatus[0] = true;
+        }
+        if (strncmp(data, "?3=true ", 8) == 0 ) {
             PinStatus[1] = false;
         }
-        if (strncmp(data, "?off=4 ", 7) == 0 ) {
+        if (strncmp(data, "?3=false ", 9) == 0 ) {
+            PinStatus[1] = true;
+        }
+        if (strncmp(data, "?5=true ", 8) == 0 ) {
             PinStatus[2] = false;
         }
-        if (strncmp(data, "?off=5 ", 7) == 0 ) {
+        if (strncmp(data, "?5=false ", 9) == 0 ) {
+            PinStatus[2] = true;
+        }
+        if (strncmp(data, "?6=true ", 8) == 0 ) {
             PinStatus[3] = false;
         }
-        if (strncmp(data, "?off=6 ", 7) == 0 ) {
-            PinStatus[4] = false;
+        if (strncmp(data, "?6=false ", 9) == 0 ) {
+            PinStatus[3] = true;
         }
-        if (strncmp(data, "?off=7 ", 7) == 0 ) {
-            PinStatus[5] = false;
+        for (i = 0; i < PinCount; i++) {
+          // Применяем изменения состояния пинов
+          digitalWrite(LedPins[i], PinStatus[i]);
         }
-        if (strncmp(data, "?off=8 ", 7) == 0 ) {
-            PinStatus[6] = false;
-        }
-        if (strncmp(data, "?off=9 ", 7) == 0 ) {
-            PinStatus[7] = false;
-        }
-
-
-      for (int i = 0; i < PinCount; i++) {
-        //int pin = LedPins[i];
-        //char buffer[];
-        //String bf;
-        //sprintf(buffer, "on=" + String(pin), pin);
-        //buffer = String(pin);
-
-        //bf = "?on=" + String(pin) + " ";
-        //if (strncmp(data, bf.c_str(), 6) == 0 ) {
-        //    PinStatus[i] = true;
-        //}
-        //char buffer[7];
-        //sprintf(buffer, "?on=%d ", pin);
-        //if (strncmp(data, buffer, 6) == 0 ) {
-        //    PinStatus[i] = true;
-        //}
-
-
-        //sprintf(buffer, "off=%d", pin);
-        //if (strncmp(data, buffer, 7) == 0 ) {
-        //    PinStatus[i] = false;
-        //}
-        //if (strstr(data, buffer)) {
-        //    PinStatus[i] = false;
-        //}
-        //PinStatus[7] = true;
-        // Применяем изменения состояния пинов
-        digitalWrite(LedPins[i], PinStatus[i]);
       }
       statusJson();
     } else {

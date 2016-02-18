@@ -51,21 +51,16 @@ boolean PinStatus[PinCount];
 // Для выключения используем диапазон от 256 до 767
 // На значения до 255 не реагируем
 // Список сенсоров
-const int sensorPins[] = {A1,A2};
+const int sensorPins[] = {A1,A2,A3,A4};
 
 // Количество сенсоров
 const int sensorCount = sizeof(sensorPins) / sizeof(int);
 
 // id пинов, на которые влияют сенсоры
-const int ledSensorPinIds[sensorCount] = {2,3};
+const int ledSensorPinIds[sensorCount] = {0,1,2,3};
 
 // Полученное значение сенсора
 int sensorValue = 0;
-
-// Фотодатчики
-const int photoSensors[] = {A5};
-const int photoCount = sizeof(photoSensors) / sizeof(int);;
-
 
 //-------------
 
@@ -85,13 +80,6 @@ void statusJson() {
   bfill.emit_p(PSTR("$F["),
     http_OK
   );
-  // Вывод информации с аналоговых датчиков (освещенность)
-  for(i = 0; i < photoCount; i++) {
-    bfill.emit_p(PSTR("{\"value\": $D, \"pin\": $D},"),
-      analogRead(photoSensors[i]),
-      photoSensors[i]
-    );
-  }
   // Вывод информации о включенных пинах
   for(i = 0; i < PinCount; i++) {
     bfill.emit_p(PSTR("{\"on\": $F, \"pin\": $D}"),
