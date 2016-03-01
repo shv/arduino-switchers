@@ -10,7 +10,7 @@
   – для управления нагрузкой ипользуем пины от 2 до 9
   – для физических выключателей испльзуем аналоговые пины (0 - нет реакции, 1/2 - выключение, 1 - включение)
   – запросы на управления через сеть имеют формат: GET /switch?<int pin>=<boolean status>
-  – запрос на получение состояний через сеть имеют формат: GET /switch или GET /status
+  – запрос на       получение состояний через сеть имеют формат: GET /switch или GET /status
   Подключаем Pins "ENC28J60 Module" к Arduino Uno.
   VCC - 3.3V
   GND - GND
@@ -21,9 +21,22 @@
 */
 #include <EtherCard.h>
 
+static uint32_t timer;
+
+// IP адрес сервера (позже вынести в конфигурацию)
+const char ecchost[] = "192.168.1.126";
+
+// MAC адрес узла
 static byte mymac[] = { 0x5A,0x5A,0x5A,0x5A,0x5A,0x5A };
 
+// IP адрес узла (позже вынести в конфигурацию)
 static byte myip[] = { 192,168,1,222 };
+// IP адрес шлюза (позже вынести в конфигурацию)
+static byte mygw[] = { 192,168,1,1 };
+// IP адрес DNS (позже вынести в конфигурацию)
+static byte mydns[] = { 192,168,1,1 };
+// IP адрес маски (позже вынести в конфигурацию)
+static byte mymask[] = { 255,255,255,0 };
 
 byte Ethernet::buffer[500];
 
@@ -34,6 +47,8 @@ int i;
 char *data;
 word len;
 word pos;
+boolean changedStatus = false;
+
 
 // Массив задействованных номеров Pins Arduino, для управления реле.
 // При правке, не забыть поправить в loop() проверку запроса
@@ -44,6 +59,20 @@ const int PinCount = sizeof(LedPins) / sizeof(int);
 
 // Массив для фиксации изменений.
 boolean PinStatus[PinCount];
+
+// Массив задействованных pin, для диммеров
+// При правке, не забыть поправить в loop() проверку запроса
+const int DimmerPins[] = {6};
+
+// Количество рабочих пинов
+const int DimmerCount = sizeof(DimmerPins) / sizeof(int);
+
+// Массив для фиксации изменений.
+boolean DimmerStatus[DimmerCount];
+
+// Массив значений.
+int DimmerLevels[DimmerCount];
+
 
 // Кнопки на аналоговых вводах
 // Для включения используем диапазон от 768 до 1023
@@ -91,25 +120,51 @@ void statusJson() {
       photoSensors[i]
     );
   }
-  // Вывод информации о включенных пинах
+  // Вывод информации о состоянии пинов
   for(i = 0; i < PinCount; i++) {
     bfill.emit_p(PSTR("{\"on\": $F, \"pin\": $D}"),
       PinStatus[i]?PSTR("false"):PSTR("true"),
       LedPins[i]
     );
-    if (i+1 < PinCount && PinCount > 1) {
+    if (DimmerCount > 0 || i+1 < PinCount && PinCount > 1) {
       bfill.emit_p(PSTR(","));
     }
   }
+  // Вывод информации о диммируемых пинах
+  for(i = 0; i < DimmerCount; i++) {
+    bfill.emit_p(PSTR("{\"on\": $F, \"pin\": $D, \"level\": $D}"),
+      DimmerStatus[i]?PSTR("true"):PSTR("false"),
+      DimmerPins[i],
+      DimmerLevels[i]
+    );
+    if (i+1 < DimmerCount && DimmerCount > 1) {
+      bfill.emit_p(PSTR(","));
+    }
+  }
+
   bfill.emit_p(PSTR("]"));
+}
+
+static void my_callback (byte status, word off, word len) {
+  // Обработка ответа от сервера
+  Ethernet::buffer[off] = 0;
+}
+
+void send_check_request() {
+  // Просим сервер перечитать статус
+  pos = ether.packetLoop(ether.packetReceive()); // check for tcp packet / проверить TCP пакеты.
+  ether.browseUrl(PSTR("/mainframe/"), "check", ecchost, my_callback);
 }
 
 void setup() {
     Serial.begin(9600);
     // По умолчанию в Библиотеке "ethercard" (CS-pin) = № 8.
     if (ether.begin(sizeof Ethernet::buffer, mymac, 10) == 0);
-    ether.staticSetup(myip);
+    // Тут есть проблема с таймаутом при попытке назначить все эти адреса (30 секунд)
+    ether.staticSetup(myip, mygw, mydns, mymask);
     ether.printIp("My SET IP: ", ether.myip); // Выводим в Serial монитор статический IP адрес.
+    ether.printIp("GW:  ", ether.gwip);
+    ether.printIp("DNS: ", ether.dnsip);
     //-----
     // Инициализация пинов ламп
     for(i = 0; i < PinCount; i++) {
@@ -117,31 +172,59 @@ void setup() {
         PinStatus[i] = true;
         digitalWrite(LedPins[i], PinStatus[i]);
     }
+    for(i = 0; i < DimmerCount; i++) {
+        pinMode(DimmerPins[i],OUTPUT);
+        DimmerStatus[i] = false;
+        DimmerLevels[i] = 0;
+        // Пока использую ШИМ для светодиода
+        analogWrite(DimmerPins[i], DimmerLevels[i]);
+
+    }
+
+    // Пытаемся разрезолвить адрес сервере
+    if (!ether.dnsLookup(ecchost))
+      Serial.println("DNS failed");
+
+    ether.printIp("SRV: ", ether.hisip);
 }
 
 void loop() {
   delay(5); // Дёргаем микроконтроллер.
 
+  // Пока так кривенько, потом причешу
+  // Диммируемые сейчас не переключаются
   for(i = 0; i < sensorCount; i++) {
     sensorValue = analogRead(sensorPins[i]);
     if (sensorValue > 255) {
       // Перепроверяем для сглаживания шума
       delay(10);
       sensorValue = analogRead(sensorPins[i]);
+      changedStatus = false;
       if (sensorValue > 767) {
         // On
+        if (PinStatus[ledSensorPinIds[i]] == true) {
+          changedStatus = true;
+        }
         PinStatus[ledSensorPinIds[i]] = false;
       } else if (sensorValue > 255) {
         // Off
+        if (PinStatus[ledSensorPinIds[i]] == false) {
+          changedStatus = true;
+        }
         PinStatus[ledSensorPinIds[i]] = true;
       }
+      // Записываем новый статус
       digitalWrite(LedPins[ledSensorPinIds[i]], PinStatus[ledSensorPinIds[i]]);
+      if (changedStatus) {
+        // Если статус изменился, сообщаем серверу
+        send_check_request();
+      }
+
     }
   }
 
+  pos = ether.packetLoop(ether.packetReceive()); // check for tcp packet / проверить TCP пакеты.
 
-  len = ether.packetReceive(); // check for ethernet packet / проверить ethernet пакеты.
-  pos = ether.packetLoop(len); // check for tcp packet / проверить TCP пакеты.
   if (pos) {
     bfill = ether.tcpOffset();
     data = (char *) Ethernet::buffer + pos;
@@ -174,9 +257,49 @@ void loop() {
         if (strncmp(data, "?5=false ", 9) == 0 ) {
             PinStatus[3] = true;
         }
+        // Диммеры пока включаются и выключаются тут
+        if (strncmp(data, "?6=true ", 8) == 0 ) {
+            DimmerStatus[0] = true;
+        }
+        if (strncmp(data, "?6=false ", 9) == 0 ) {
+            DimmerStatus[0] = false;
+        }
+
         for (i = 0; i < PinCount; i++) {
           // Применяем изменения состояния пинов
           digitalWrite(LedPins[i], PinStatus[i]);
+        }
+
+        for (i = 0; i < DimmerCount; i++) {
+          // Применяем изменения состояния уровня
+          if (DimmerStatus[i]) {
+            analogWrite(DimmerPins[i], DimmerLevels[i] * 2);
+          } else {
+            analogWrite(DimmerPins[i], 0);
+          }
+        }
+
+      }
+      statusJson();
+    } else if (strncmp("GET /dim", data, 8) == 0) {
+      data += 8;
+      if (strncmp(data, " ", 1) != 0 ) {
+        if (strncmp(data, "?6=", 3) == 0 ) {
+            data += 3;
+            char *value = strchr(data, ' ');
+            if (value != 0) {
+              *value = 0;
+              DimmerLevels[0] = atoi(data);
+              delete value;
+            }
+        }
+        for (i = 0; i < DimmerCount; i++) {
+          // Применяем изменения состояния уровня
+          if (DimmerStatus[i]) {
+            analogWrite(DimmerPins[i], DimmerLevels[i] * 2);
+          } else {
+            analogWrite(DimmerPins[i], 0);
+          }
         }
       }
       statusJson();
