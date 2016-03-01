@@ -36,9 +36,8 @@ word len;
 word pos;
 
 // Массив задействованных номеров Pins Arduino, для управления реле.
-// На моей первой ардуинке не работает пин 4
 // При правке, не забыть поправить в loop() проверку запроса
-const int LedPins[] = {2,3,5,6};
+const int LedPins[] = {2,3,4,5};
 
 // Количество рабочих пинов
 const int PinCount = sizeof(LedPins) / sizeof(int);
@@ -51,7 +50,7 @@ boolean PinStatus[PinCount];
 // Для выключения используем диапазон от 256 до 767
 // На значения до 255 не реагируем
 // Список сенсоров
-const int sensorPins[] = {A1,A2,A3,A4};
+const int sensorPins[] = {A0,A1,A2,A3};
 
 // Количество сенсоров
 const int sensorCount = sizeof(sensorPins) / sizeof(int);
@@ -151,16 +150,16 @@ void loop() {
         if (strncmp(data, "?3=false ", 9) == 0 ) {
             PinStatus[1] = true;
         }
-        if (strncmp(data, "?5=true ", 8) == 0 ) {
+        if (strncmp(data, "?4=true ", 8) == 0 ) {
             PinStatus[2] = false;
         }
-        if (strncmp(data, "?5=false ", 9) == 0 ) {
+        if (strncmp(data, "?4=false ", 9) == 0 ) {
             PinStatus[2] = true;
         }
-        if (strncmp(data, "?6=true ", 8) == 0 ) {
+        if (strncmp(data, "?5=true ", 8) == 0 ) {
             PinStatus[3] = false;
         }
-        if (strncmp(data, "?6=false ", 9) == 0 ) {
+        if (strncmp(data, "?5=false ", 9) == 0 ) {
             PinStatus[3] = true;
         }
         for (i = 0; i < PinCount; i++) {
