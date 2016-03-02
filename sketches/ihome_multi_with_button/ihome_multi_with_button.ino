@@ -24,19 +24,10 @@
 static uint32_t timer;
 
 // IP адрес сервера (позже вынести в конфигурацию)
-const char ecchost[] = "192.168.1.126";
+const char ecchost[] PROGMEM = "192.168.1.126";
 
 // MAC адрес узла
 static byte mymac[] = { 0x5A,0x5A,0x5A,0x5A,0x5A,0x5A };
-
-// IP адрес узла (позже вынести в конфигурацию)
-static byte myip[] = { 192,168,1,222 };
-// IP адрес шлюза (позже вынести в конфигурацию)
-static byte mygw[] = { 192,168,1,1 };
-// IP адрес DNS (позже вынести в конфигурацию)
-static byte mydns[] = { 192,168,1,1 };
-// IP адрес маски (позже вынести в конфигурацию)
-static byte mymask[] = { 255,255,255,0 };
 
 byte Ethernet::buffer[500];
 
@@ -45,7 +36,6 @@ BufferFiller bfill;
 // Общие переменные
 int i;
 char *data;
-word len;
 word pos;
 boolean changedStatus = false;
 
@@ -160,8 +150,12 @@ void setup() {
     Serial.begin(9600);
     // По умолчанию в Библиотеке "ethercard" (CS-pin) = № 8.
     if (ether.begin(sizeof Ethernet::buffer, mymac, 10) == 0);
+
+    if (!ether.dhcpSetup())
+      Serial.println(F("DHCP failed"));
+
     // Тут есть проблема с таймаутом при попытке назначить все эти адреса (30 секунд)
-    ether.staticSetup(myip, mygw, mydns, mymask);
+    //ether.staticSetup(myip, mygw, mydns, mymask);
     ether.printIp("My SET IP: ", ether.myip); // Выводим в Serial монитор статический IP адрес.
     ether.printIp("GW:  ", ether.gwip);
     ether.printIp("DNS: ", ether.dnsip);
@@ -228,6 +222,7 @@ void loop() {
   if (pos) {
     bfill = ether.tcpOffset();
     data = (char *) Ethernet::buffer + pos;
+    // Варианты запроса
     if (strncmp("GET /status ", data, 12) == 0) {
       statusJson();
     } else if (strncmp("GET /switch", data, 11) == 0) {
@@ -306,6 +301,7 @@ void loop() {
     } else {
       bfill.emit_p(http_404);
     }
+    // Отправляем ответ
     ether.httpServerReply(bfill.position()); // send http response
   }
 }
