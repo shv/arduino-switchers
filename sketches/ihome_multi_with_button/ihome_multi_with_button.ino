@@ -69,16 +69,17 @@ int DimmerLevels[DimmerCount];
 // Для выключения используем диапазон от 256 до 767
 // На значения до 255 не реагируем
 // Список сенсоров
-const int sensorPins[] = {A0,A1,A2,A3};
+const int sensorPins[] = {A0,A1};
 
 // Количество сенсоров
 const int sensorCount = sizeof(sensorPins) / sizeof(int);
 
 // id пинов, на которые влияют сенсоры
-const int ledSensorPinIds[sensorCount] = {0,1,2,3};
+const int ledSensorPinIds[sensorCount] = {0,1};
 
 // Полученное значение сенсора
 int sensorValue = 0;
+
 
 // Фотодатчики
 const int photoSensors[] = {A5};
