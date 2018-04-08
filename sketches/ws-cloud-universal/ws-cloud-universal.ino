@@ -1,8 +1,8 @@
 // https://github.com/brandenhall/Arduino-Websocket
 
 #include <Ethernet.h>
-//#include <EthernetClient.h>
-//#include <SPI.h>
+#include <EthernetClient.h>
+#include <SPI.h>
 #include "DHT.h"
 #include <string.h>
 #include <Wire.h>
@@ -56,7 +56,7 @@ String level; // Уровень яркости для лампы
 String value; // Значение сенаора
 
 // Список сущностей, которые можно включать и выключать
-const int PowerPins[] = {3, 4};
+const int PowerPins[] = {3, 4, 8, 9};
 
 // Количество рабочих пинов
 const int PowerPinCount = sizeof(PowerPins) / sizeof(int);
@@ -103,7 +103,7 @@ boolean connectClient() {
   }
 
   // Handshake with the server
-  webSocketClient.path = "/ws/<tocken>";
+  webSocketClient.path = "/ws/<token>";
   webSocketClient.host = "wall.electro-control-center.ru";
   
   if (webSocketClient.handshake(client)) {
@@ -128,9 +128,9 @@ void setup() {
   // Инициализация пинов ламп
   for(i = 0; i < PowerPinCount; i++) {
       pinMode(PowerPins[i],OUTPUT);
-      // true - выключен
-      // false - включен
-      PowerPinStatuses[i] = true;
+      // false - выключен
+      // true - включен
+      PowerPinStatuses[i] = false;
   }
   // Инициализация пинов кнопок
   for(i = 0; i < ControlPinCount; i++) {
@@ -138,6 +138,7 @@ void setup() {
     pinMode(ControlPins[i],INPUT);
   }
   pinMode(PIRPin,INPUT);
+  apply_pin_values();
 
   dht.begin();
   Wire.begin();
@@ -164,10 +165,10 @@ void setup() {
 
 void loop() {
   if (client.connected()) {
-    uint8_t *opcode;
-    int opcode1;
+    uint8_t opcode[1];
+//    int opcode1;
     data = "";
-    webSocketClient.getData(data, opcode1, opcode);
+    webSocketClient.getData(data, opcode);
 
 
     if (data.length() > 0) {
@@ -182,14 +183,25 @@ void loop() {
           Serial.print("Received data: ");
           Serial.println(data);
       #endif
-      if (opcode1 == 0x89) {
-        Serial.print("PING PONG");
+
+      #ifdef DEBUGGING
+          Serial.print("Opcode: ");
+          Serial.println(opcode[0]);
+          // Serial.println(opcode[1]);
+      #endif
+
+      // if (opcode[0] == 0x89) {
+      if (opcode[0] == 0x9) {
+        Serial.println("PING PONG");
         webSocketClient.sendData(data, WS_OPCODE_PONG | WS_FIN);
-//        data = "";
-      } else if (opcode1 == 0x88) {
-        Serial.print("Disconnected");
+          data = "";
+      // } else if (data == "a") {
+      //   Serial.println("PING PONG a");
+      //   webSocketClient.sendData(data, WS_OPCODE_PONG | WS_FIN);
+      // } else if (opcode[0] == 0x88) {
+      } else if (opcode[0] == 0x8) {
+        Serial.println("Disconnected");
         client.stop();
-//        data =
       } else {
         Serial.print("New string");
         apply_string(data);
@@ -198,13 +210,13 @@ void loop() {
     // Отправляем изменение датчика движения сразу
     if (PIRPinValue != digitalRead(PIRPin)) {
       PIRPinValue = digitalRead(PIRPin);
-      PowerPinStatuses[0] = !PIRPinValue;
+      PowerPinStatuses[0] = PIRPinValue;
       apply_pin_values();
       data = "s:" + String(PIRPin) + ":";
       data += String(PIRPinValue?1:0);
       data += ";";
       data += "l:" + String(PowerPins[0]) + ":";
-      data += String(!PowerPinStatuses[0]) + ":1:";
+      data += String(PowerPinStatuses[0]) + ":1:";
       webSocketClient.sendData(data);
     }
     // Два запроса с разными интервалами
@@ -266,7 +278,7 @@ void collectSensorsData(String& data) {
   #ifdef DEBUGGING
     Serial.println(Temperature);
   #endif
-  
+  data = "";
   #ifdef DEBUGGING
     Serial.println("Creating data: ");
   #endif
@@ -323,7 +335,7 @@ void apply_pin_values() {
     // Применяем изменения состояния пинов
     // false - выключен
     // true - включен
-    digitalWrite(PowerPins[i], PowerPinStatuses[i]);
+    digitalWrite(PowerPins[i], 1-PowerPinStatuses[i]);
   }
 }
 
@@ -365,7 +377,7 @@ void apply_string(String& readString) {
     }
     for (i = 0; i < PowerPinCount; i++) {
       if (PowerPins[i] == pinsid) {
-        PowerPinStatuses[i] = !on;
+        PowerPinStatuses[i] = on;
       }
     }
     index = readString.indexOf(";");
